@@ -1,4 +1,4 @@
-const CACHE_NAME = 'hiit-timer-v1';
+const CACHE_NAME = 'hiit-timer-v2';
 // Add all files that need to be saved offline
 const urlsToCache = [
   './index.html',
