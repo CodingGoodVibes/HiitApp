@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <!-- Ensures the app scales correctly on mobile phones -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>HIIT Timer</title>
+    <style>
+        /* Base styling for the entire app, setting a dark background and default font */
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            background-color: #222;
+            color: white;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            text-transform: uppercase;
+        }
+
+        /* The Setup screen where you configure your workout */
+        #setup-screen {
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        /* Styling for the input fields to make them large and touch-friendly */
+        .input-group {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 1.2rem;
+        }
+        input {
+            width: 80px;
+            padding: 10px;
+            font-size: 1.2rem;
+            text-align: center;
+            background: #333;
+            border: 1px solid #555;
+            color: white;
+            border-radius: 5px;
+        }
+
+        /* The main Start button styling */
+        button {
+            background-color: #FFFF00; /* Bright yellow */
+            color: black;
+            border: none;
+            padding: 15px;
+            font-size: 1.5rem;
+            font-weight: bold;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 20px;
+        }
+
+        /* The Timer screen (hidden by default until Start is pressed) */
+        #timer-screen {
+            display: none;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        /* Top bar showing total remaining time or current status */
+        #top-bar {
+            text-align: center;
+            padding: 10px;
+            font-size: 1rem;
+            font-weight: bold;
+        }
+
+        /* The main display area that changes color (Yellow=Prepare, Green=Work, Red=Rest) */
+        #main-display {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background-color: #FFFF00; /* Defaults to Prepare Yellow */
+            color: black;
+            transition: background-color 0.3s;
+        }
+
+        /* The large countdown numbers */
+        #time-display {
+            font-size: 8rem;
+            font-weight: bold;
+            line-height: 1;
+            margin: 0;
+        }
+
+        /* Text label above the time (e.g., "PREPARE", "WORK") */
+        #phase-label {
+            font-size: 3rem;
+            font-weight: bold;
+            margin-bottom: -10px;
+        }
+
+        /* Bottom section showing rounds left and a stop button */
+        #bottom-bar {
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            padding: 20px;
+            background-color: #222;
+        }
+        
+        .rounds-info {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        #rounds-display {
+            color: #33B5E5; /* Bright blue for contrast */
+            font-size: 3rem;
+            font-weight: bold;
+            line-height: 1;
+        }
+
+        /* Stop button styled to look like the pause/stop control */
+        #stop-btn {
+            background: none;
+            border: 4px solid #FFFF00;
+            color: #FFFF00;
+            border-radius: 50%;
+            width: 80px;
+            height: 80px;
+            font-size: 1.2rem;
+            margin-top: 0;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- SETUP SCREEN -->
+    <div id="setup-screen">
+        <h2>HIIT Configuration</h2>
+        
+        <div class="input-group">
+            <label>Rounds (1-50):</label>
+            <input type="number" id="input-rounds" value="10" min="1" max="50">
+        </div>
+        
+        <div class="input-group">
+            <label>Work (seconds):</label>
+            <input type="number" id="input-work" value="40" min="5" max="300">
+        </div>
+        
+        <div class="input-group">
+            <label>Rest (seconds):</label>
+            <input type="number" id="input-rest" value="20" min="5" max="300">
+        </div>
+
+        <p id="total-time-estimate">Total Time: 10m 00s</p>
+        
+        <button onclick="startWorkout()">START</button>
+    </div>
+
+    <!-- TIMER SCREEN -->
+    <div id="timer-screen">
+        <div id="top-bar">
+            ROUNDS<br><span id="total-time-left">00:00</span>
+        </div>
+        
+        <div id="main-display">
+            <div id="phase-label">PREPARE</div>
+            <div id="time-display">00:05</div>
+        </div>
+        
+        <div id="bottom-bar">
+            <div class="rounds-info">
+                <div id="rounds-display">10</div>
+                <div style="font-size: 0.8rem;">ROUNDS LEFT</div>
+            </div>
+            <button id="stop-btn" onclick="stopWorkout()">STOP</button>
+        </div>
+    </div>
+
+    <script>
+        // --- Variables to hold workout state ---
+        let timerInterval;     // Holds the setInterval ID so we can stop it
+        let currentPhase = 'prepare'; // Can be 'prepare', 'work', or 'rest'
+        let timeLeft = 0;      // Seconds left in the current phase
+        let currentRound = 0;  // Which round we are currently on
+        
+        // Variables to store user settings
+        let totalRounds, workTime, restTime;
+
+        // --- Audio System (Web Speech API) ---
+        // Browsers require user interaction before audio can play, so we init this on Start
+        function speak(text) {
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.rate = 1.2; // Speak slightly faster than normal
+            window.speechSynthesis.speak(utterance);
+        }
+
+        // --- Estimate Total Time ---
+        // Runs whenever an input changes to update the estimated time text
+        function updateEstimate() {
+            const r = parseInt(document.getElementById('input-rounds').value) || 0;
+            const w = parseInt(document.getElementById('input-work').value) || 0;
+            const rest = parseInt(document.getElementById('input-rest').value) || 0;
+            
+            // Formula: 5s prepare + (Work * Rounds) + (Rest * (Rounds - 1))
+            const totalSeconds = 5 + (w * r) + (rest * (r - 1));
+            
+            const mins = Math.floor(totalSeconds / 60);
+            const secs = totalSeconds % 60;
+            document.getElementById('total-time-estimate').innerText = `Total Time: ${mins}m ${secs}s`;
+        }
+
+        // Attach the update function to input fields so it updates live
+        document.getElementById('input-rounds').addEventListener('input', updateEstimate);
+        document.getElementById('input-work').addEventListener('input', updateEstimate);
+        document.getElementById('input-rest').addEventListener('input', updateEstimate);
+        updateEstimate(); // Run once on load
+
+        // --- Formatting Helper ---
+        // Turns 5 into "00:05" for the display
+        function formatTime(seconds) {
+            const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+            const s = (seconds % 60).toString().padStart(2, '0');
+            return `${m}:${s}`;
+        }
+
+        // --- Core Timer Logic ---
+        function startWorkout() {
+            // 1. Get values from inputs
+            totalRounds = parseInt(document.getElementById('input-rounds').value);
+            workTime = parseInt(document.getElementById('input-work').value);
+            restTime = parseInt(document.getElementById('input-rest').value);
+            
+            // 2. Setup initial state
+            currentRound = totalRounds;
+            currentPhase = 'prepare';
+            timeLeft = 5; // 5 seconds get ready time
+            
+            // Initialize audio engine (silent speak to unlock it on mobile)
+            speak(""); 
+            speak("Get ready");
+
+            // 3. Switch UI from Setup to Timer
+            document.getElementById('setup-screen').style.display = 'none';
+            document.getElementById('timer-screen').style.display = 'flex';
+            
+            // 4. Update initial UI elements
+            updateDisplay();
+            
+            // 5. Start the interval loop (runs every 1000 milliseconds = 1 second)
+            timerInterval = setInterval(tick, 1000);
+        }
+
+        function tick() {
+            timeLeft--; // Deduct 1 second
+
+            // Audio cues for 3, 2, 1
+            if (timeLeft === 3) speak("3");
+            if (timeLeft === 2) speak("2");
+            if (timeLeft === 1) speak("1");
+
+            // "Half way" cue for work sets
+            if (currentPhase === 'work' && timeLeft === Math.floor(workTime / 2)) {
+                speak("Half way");
+            }
+
+            // Phase transitioning logic when time hits 0
+            if (timeLeft <= 0) {
+                if (currentPhase === 'prepare') {
+                    // Prepare -> Work
+                    currentPhase = 'work';
+                    timeLeft = workTime;
+                    speak("Work");
+                } 
+                else if (currentPhase === 'work') {
+                    // Work -> Rest (or Finish if last round)
+                    currentRound--; // Round is complete
+                    
+                    if (currentRound > 0) {
+                        currentPhase = 'rest';
+                        timeLeft = restTime;
+                        speak("Rest");
+                    } else {
+                        // Workout complete
+                        finishWorkout();
+                        return; // Stop running the tick
+                    }
+                } 
+                else if (currentPhase === 'rest') {
+                    // Rest -> Work
+                    currentPhase = 'work';
+                    timeLeft = workTime;
+                    speak("Work");
+                }
+            }
+
+            // Update the screen with the new time and colors
+            updateDisplay();
+        }
+
+        // --- UI Updater ---
+        function updateDisplay() {
+            const mainDisplay = document.getElementById('main-display');
+            const phaseLabel = document.getElementById('phase-label');
+            const timeDisplay = document.getElementById('time-display');
+            const roundsDisplay = document.getElementById('rounds-display');
+
+            timeDisplay.innerText = formatTime(timeLeft);
+            roundsDisplay.innerText = currentRound;
+            phaseLabel.innerText = currentPhase.toUpperCase();
+
+            // Change background colors based on phase
+            if (currentPhase === 'prepare') {
+                mainDisplay.style.backgroundColor = '#FFFF00'; // Yellow
+                mainDisplay.style.color = 'black';
+            } else if (currentPhase === 'work') {
+                mainDisplay.style.backgroundColor = '#99FF33'; // Bright Green
+                mainDisplay.style.color = 'black';
+            } else if (currentPhase === 'rest') {
+                mainDisplay.style.backgroundColor = '#FF3333'; // Bright Red
+                mainDisplay.style.color = 'white';
+            }
+        }
+
+        // --- Stop / Finish Functions ---
+        function stopWorkout() {
+            clearInterval(timerInterval); // Stop the clock
+            document.getElementById('setup-screen').style.display = 'flex';
+            document.getElementById('timer-screen').style.display = 'none';
+        }
+
+        function finishWorkout() {
+            clearInterval(timerInterval);
+            speak("Workout complete. Well done.");
+            
+            // Set final screen to a generic completion view
+            document.getElementById('phase-label').innerText = "DONE";
+            document.getElementById('time-display').innerText = "00:00";
+            document.getElementById('main-display').style.backgroundColor = '#33B5E5'; // Blue
+            
+            // Wait 3 seconds, then return to setup
+            setTimeout(() => {
+                stopWorkout();
+            }, 3000);
+        }
+    </script>
+</body>
+</html>
